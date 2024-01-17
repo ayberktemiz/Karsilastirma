@@ -33,9 +33,14 @@
 #define __usr_sleep_log
 #define __usr_system_log 
 #define __usr_sensor_log
+#define __it_log
 
+#define __gsm_lib_imp_log               // important log
+#define __gsm_lib_detailed_log        // detailed  log
 
-#define TOPIC_BRK2MCU "ayb_C2M"
+#define __keep_stats
+
+#define TOPIC_BRK2MCU "ayb_C2M2"
 #define TOPIC_MCU2BRK "ayb_M2C"
 
 #include "usr_arch.h"

@@ -14,7 +14,7 @@
 #ifdef GSM2G
     #define _gsm_watchdog()                   HAL_IWDG_Refresh(&hiwdg)
     #define _m65_m66
-    //#define _gsm_debug
+    
     #ifdef _freertos
         #include "cmsis_os.h"
         #define _gsm_malloc pvPortMalloc
@@ -44,11 +44,15 @@
  
 #include "MQTTPacket.h" 
 
-#define _gsm_receive_buffer_size         512  // gercek olan 2048
-#define _gsm_trasbuffer_buffer_size      1024 // 
+#define __gsm_lib_imp_log               // important log
+//#define __gsm_lib_detailed_log        // detailed  log
 
-#define _gsm_mqtt_max_topic_size         128  //
-#define _gsm_mqtt_max_payload_size       1024 //
+#define _gsm_receive_buffer_size         512  
+#define _gsm_buffer_size                 1150
+
+#define _gsm_mqtt_max_topic_size         128  
+#define _gsm_mqtt_max_payload_size       1024
+
 
 // new
 /* Bu makro      UL_GsmModuleMqttPublishTopic   ve    UL_GsmModuleMqttSubcribeTopic        de var */
@@ -120,11 +124,11 @@ typedef struct S_GSM_APN_PARAMETERS_TAG
 typedef struct S_GSM_MQTT_PARAMETERS_TAG
 {
     char urlBuf[64];       // 256
-    int port;
+    uint32_t port;
     char randomIdBuf[16];   // 64
     char usernameBuf[16];   // 64
     char passwordBuf[16];   // 64
-    int keepAlive;
+    uint8_t keepAlive;
     char userConnectionName[16];   // 64
     int connectionTimeout;
     EPppMqttUrlType urlType;
@@ -155,9 +159,6 @@ typedef struct S_GSM_FTP_TAG
     char fileNameBuf[64];
 }S_GSM_FTP;
 
-extern bool responseSubcribeDataCallbackFlag;
-extern char response[];
-
 void UL_GsmModuleInitial(S_GSM_PARAMETERS *f_pParam);
 void UL_GsmModuleDeInitial(void);
 bool UL_GsmModuleCheck(void);
@@ -166,8 +167,10 @@ bool UL_GsmModuleMqttInitial(const S_GSM_MQTT_CONNECTION_PARAMETERS *f_pcParamet
 bool UL_GsmModuleMqttSubcribeTopic(const char *f_cpTopic, int f_qos);
 bool UL_GsmModuleMqttPublishTopic(const char *f_cpTopic, const char *f_cpData, int f_qos, int f_retain);
 void UL_GsmModuleHardwareReset(void);
-void UL_GsmModuleMqttGeneral(void);
+uint8_t UL_GsmModuleMqttGeneral(void);
 void UL_GsmModuleMqttClosed(void);
+
+bool UL_GsmModuleMqttStart(const S_GSM_MQTT_CONNECTION_PARAMETERS *f_pcParameter);
 
 void UL_GsmModuleUartInterruptCallback(void);
 void UL_GsmModuleMqttConnectionStatusCallback(EGsmMqttConnectionStatus f_eStatus);
@@ -179,5 +182,7 @@ int UL_GsmModuleReadFile(const char *f_cpFileName, uint32_t f_startIndex, uint32
 bool UL_GsmModuleDeleteFile(const char *f_cpFileName);
 
 void UL_GsmModulePeripheral(EGsmPeripheral f_eControl);
+
+uint8_t* UL_GetHelperBufAddress(void);
 
 #endif

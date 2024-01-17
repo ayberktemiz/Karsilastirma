@@ -53,7 +53,7 @@ void UsrSleepGeneral(void)
             char DS[10]; int DS_int = (g_sNvsDeviceInfo.sendingDataInterval - (ts - g_dataSendTs)); if(DS_int <=0) sprintf(DS, "%s", "Ready"); else sprintf(DS, "%dsec", DS_int);
             char SR[10]; int SR_int = (g_sNvsDeviceInfo.sensorWakeUpTime - (ts - g_sensorReadTs)); if(SR_int <=0) sprintf(SR, "%s", "Ready"); else sprintf(SR, "%dsec", SR_int);
             char DR[10]; int DR_int = ((_USR_SYSTEM_DAILY_RESET_TIME-g_dailyResetTimer)/1000); if(DR_int <=0) sprintf(DR, "%s", "Ready"); else sprintf(DR, "%dsec", DR_int);
-            __logsi("Intervals Checked. Time Until to Next; CoverAndFireCheck: %s, DataSend: %s, SensorRead: %s, DailyReset: %s",CaFC , DS , SR , DR);
+            __logsi("Time Until to Next; Cover/FireCheck: %s, DataSend: %s, SensorRead: %s, DailyReset: %s",CaFC , DS , SR , DR);
         #endif
 
         #ifdef _accModuleCompile
@@ -120,7 +120,7 @@ void UsrSleepGeneral(void)
             if ((ts - g_dataSendTs) >= g_sNvsDeviceInfo.sendingDataInterval)
             {
                 #ifdef __usr_sleep_log
-                    __logsi("ts: %d, Wake up Reason: Dummy Data Send ! There is no data sent since (%dsec). So sensor read started and Data will be sent.\n", UL_RtcGetTs(), g_sNvsDeviceInfo.sendingDataInterval);
+                    __logsi("ts: %d, Wake up Reason: Dummy Data Send ! There is no data sent since %dsec. So sensor read started and Data will be sent.\n", UL_RtcGetTs(), g_sNvsDeviceInfo.sendingDataInterval);
                 #endif
                 if(alarmCheckFlg)
                     _wakeUpRequest = 1;
@@ -138,7 +138,7 @@ void UsrSleepGeneral(void)
             else if(g_accelometerWakeUpFlag)
             {
                 #ifdef __usr_sleep_log
-                    __logsi("ts: %d, Wake up Reason: Accelometer detected Shake. Data will be sent.\n", UL_RtcGetTs(), g_sNvsDeviceInfo.sensorWakeUpTime);
+                    __logsi("ts: %d, Wake up Reason: Accelometer detected Shake. Data will be sent.\n", UL_RtcGetTs());
                 #endif
                 if(alarmCheckFlg)
                     _wakeUpRequest = 1;
@@ -187,7 +187,7 @@ void UsrSleepGeneral(void)
                 if(!_wakeUpRequest)
                 {
                    #ifdef __usr_sleep_log
-                    __logsi("ts: %d, Fire and Cover alarms Checked. No Alarm Condition. Back to sleep again.\n", UL_RtcGetTs());
+                    __logsi("ts: %d, Fire and Cover alarms Checked. No Alarm Condition. Back to sleep again.", UL_RtcGetTs());
                    #endif
                    goto main_sleep;
                 }
@@ -232,7 +232,7 @@ _io void SleepProcedureProc(void)
 {
     #ifdef __usr_sleep_log
         SystemClock_Config();       /// LOG GONDEREBILMEK ICIN !!!
-        __logse("ts: %d, !!! Device Just Enter the Sleep !\n",UL_RtcGetTs());
+        __logse("ts: %d, Device Just Enter the Sleep !!!!\n",UL_RtcGetTs());
         HAL_UART_DeInit(&hlpuart1);  /// LOG GONDEREBILMEK ICIN !!!            
     #endif
 
@@ -244,7 +244,7 @@ _io void SleepProcedureProc(void)
     #ifdef __usr_sleep_log
         HAL_UART_Init(&hlpuart1);   /// LOG GONDEREBILMEK ICIN !!! 
         SystemClock_Config();       /// LOG GONDEREBILMEK ICIN !!! 
-        __logse("ts: %d, Device Just Wake Up !!!",UL_RtcGetTs());
+        __logse("ts: %d, !!! Device Just Wake Up",UL_RtcGetTs());
     #endif
 }
 

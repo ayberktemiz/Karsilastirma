@@ -127,6 +127,7 @@ bool UL_AccelFabrication(void)
     return true;
 }
 
+/*
 // Bu flag interrupt.c ye bağlı ve oradan da usr_system.c ye gidiyor, bağımsız değil, düşünmek lazim
 void UL_AccelometerClearFlag(void)
 {
@@ -137,4 +138,4 @@ void UL_AccelometerClearFlag(void)
         g_accelometerInterruptDetectedFlag = false;
     }
 }
-
+*/

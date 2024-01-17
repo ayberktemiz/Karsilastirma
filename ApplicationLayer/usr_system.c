@@ -28,7 +28,6 @@ bool g_wakeUpRtcCheckDataFlag   = false;
 uint32_t g_dataSendTs;
 bool g_fireAlarmFlag;
 uint32_t g_packageEventBits;                                // enum yerine geçen değişken
-uint16_t g_subcribeDataCallbackCounter;                     // UL_GsmModuleMqttSubcribeDataCallback içinde olan bir degisken
 uint32_t g_dailyResetTimer;                                 // İki degisken de interrupt icerisinde
 uint32_t g_waitResponseCount;
 
@@ -60,9 +59,9 @@ void UsrSystemGeneral(void)
 void UL_GsmModuleMqttSubcribeDataCallback(const char *f_pTopic, uint16_t f_topicLen, const char *f_pPayload, uint16_t f_payloadLen)
 {
     #ifdef __usr_system_log
-        __logsw("UL_GsmModuleMqttSubcribeDataCallback:  Topic: %.*s  Payload: %.*s\n", f_topicLen, f_pTopic, f_payloadLen, f_pPayload);
+        //__logsw("UL_GsmModuleMqttSubcribeDataCallback:  Topic: %.*s  Payload: %.*s\n", f_topicLen, f_pTopic, f_payloadLen, f_pPayload);
     #endif
-    g_subcribeDataCallbackCounter++;  // Sadece kac defa parse yapacagimizi gosterir.
+    //g_subcribeDataCallbackCounter++;  // Sadece kac defa parse yapacagimizi gosterir.
 }
 
 
@@ -272,10 +271,25 @@ _io void PreProcessorProc(void)
 {
     HAL_Delay(500);
     #ifdef __usr_system_log 
-        __logsi("********* Main app was started version number : %s  ************", _device_version);
+        __logse("********* Main app was started version number : %s  ************", _device_version);
+        if(__HAL_RCC_GET_FLAG(RCC_FLAG_OBLRST))
+            __logse("Reset reason: RCC_FLAG_OBLRST");
+        if(__HAL_RCC_GET_FLAG(RCC_FLAG_PINRST))
+            __logse("Reset reason: RCC_FLAG_PINRST");
+        if(__HAL_RCC_GET_FLAG(RCC_FLAG_PORRST))
+            __logse("Reset reason: RCC_FLAG_PORRST");
+        if(__HAL_RCC_GET_FLAG(RCC_FLAG_SFTRST))
+            __logse("Reset reason: RCC_FLAG_SFTRST");
+        if(__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST))
+            __logse("Reset reason: RCC_FLAG_IWDGRST");
+        if(__HAL_RCC_GET_FLAG(RCC_FLAG_WWDGRST))
+            __logse("Reset reason: RCC_FLAG_WWDGRST");
+        if(__HAL_RCC_GET_FLAG(RCC_FLAG_LPWRRST))
+            __logse("Reset reason: RCC_FLAG_LPWRRST");
+        
+        __HAL_RCC_CLEAR_RESET_FLAGS();
     #endif
 
     for(uint8_t i=0; i < 20; i++)
         HAL_GPIO_WritePin(g_emptyPinGpioPort[i], g_emptyPinGpioPin[i], GPIO_PIN_RESET);
-    
 }

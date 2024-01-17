@@ -140,31 +140,138 @@ void UL_LedAccelError(void)
 }
 
 
+/*
 void UL_LedGsmNotifications(uint8_t f_value)
 {
     UL_LedAllDisable();
-    if(f_value == 0)
+
+    if(f_value == 0)                                  // Yeşil 5 kez Yanar Söner (GSM Mission Basarili)
     {
-        for(uint8_t i = 0; i < 6; i++)
+        for(uint8_t i = 0; i < 5; i++)
         {
             _RGB_LED_GREEN_CONTROL(1);
             _led_delay(100);
             _RGB_LED_GREEN_CONTROL(0);
-            _led_delay(400);
-        }
-    }
-
-    else
-    {
-        for(uint8_t i = 0; i < 6; i++)
-        {
-            _RGB_LED_BLUE_CONTROL(enableLedPeripheral);
             _led_delay(100);
-            _RGB_LED_BLUE_CONTROL(disableLedPeripheral);
-            _led_delay(400);
         }
     }
 
+    else if(f_value == 1)                              // Kirmizi 5 kez Yanar Söner (GSM Mission Fail)         
+    {
+        for(uint8_t i = 0; i < 5; i++)
+        {
+            _RGB_LED_RED_CONTROL(1);
+            _led_delay(100);
+            _RGB_LED_RED_CONTROL(0);
+            _led_delay(100);
+        }
+    }
 
+    else if(f_value == 2)                               // Lacivert 5 kez Yanar Söner (GSM Mission Started)
+    {
+        for(uint8_t i = 0; i < 5; i++)
+        {
+            _RGB_LED_BLUE_CONTROL(1);
+            _led_delay(100);
+            _RGB_LED_BLUE_CONTROL(0);
+            _led_delay(100);
+        }
+    }
 
+    if(f_value == 3)                                     // Turkuaz 5 kez Yanar Söner (Data Send Basarili)
+    {
+        for(uint8_t i = 0; i < 5; i++)
+        {
+            _RGB_LED_BLUE_CONTROL(1);
+            _RGB_LED_GREEN_CONTROL(1);
+            _led_delay(100);
+            _RGB_LED_BLUE_CONTROL(0);
+            _RGB_LED_GREEN_CONTROL(0);
+            _led_delay(100);
+        }
+    }
+    else if(f_value == 4)                                 // Turkuaz-Kirmizi 5 kez sirayla Yanar  (Response Gelmemis)
+    {
+        for(uint8_t i = 0; i < 5; i++)
+        {
+            _RGB_LED_BLUE_CONTROL(1);
+            _RGB_LED_GREEN_CONTROL(1);
+            _led_delay(100);
+            _RGB_LED_BLUE_CONTROL(0);
+            _RGB_LED_GREEN_CONTROL(0);
+            _RGB_LED_RED_CONTROL(1);
+            _led_delay(100);
+            _RGB_LED_RED_CONTROL(0);
+        }
+    }
+    else if(f_value == 5)                                  // Turkuaz-Yesil 5 kez sirayla Yanar  (Response Alindi)
+    {
+        for(uint8_t i = 0; i < 5; i++)
+        {
+            _RGB_LED_BLUE_CONTROL(1);
+            _RGB_LED_GREEN_CONTROL(1);
+            _led_delay(100);
+            _RGB_LED_BLUE_CONTROL(0);
+            _led_delay(100);
+        }
+    }
+
+    UL_LedAllDisable();
+}
+*/
+
+void UL_LedGsmNotifications(uint8_t f_value)
+{
+    UL_LedAllDisable();
+
+    if(f_value == 0)                                  // Yeşil 5 kez Yanar Söner (GSM Mission Basarili)
+    {
+        for(uint8_t i = 0; i < 4; i++)
+        {
+            _RGB_LED_GREEN_CONTROL(1);
+            _led_delay(150);
+            _RGB_LED_GREEN_CONTROL(0);
+            _led_delay(100);
+        }
+    }
+
+    else if(f_value == 1)                              // Lacivert 5 kez Yanar Söner (GSM Mission Fail)         
+    {
+        for(uint8_t i = 0; i < 4; i++)
+        {
+            _RGB_LED_BLUE_CONTROL(1);
+            _led_delay(250);
+            _RGB_LED_BLUE_CONTROL(0);
+            _led_delay(100);
+        }
+    }
+
+    else if(f_value == 2)                               // Kirmizi 5 kez Yanar Söner (No Sim Card)
+    {
+        for(uint8_t i = 0; i < 4; i++)
+        {
+            _RGB_LED_RED_CONTROL(1);
+            _led_delay(250);
+            _RGB_LED_RED_CONTROL(0);
+            _led_delay(100);
+        }
+    }
+    
+    UL_LedAllDisable();
+}
+
+void UL_LedGsmWaitForResponse(uint16_t f_value, uint16_t f_period)          // Beklerken Turkuaz Blink Animation
+{
+    _io uint32_t _tsForBlinkAnim = 0;
+
+    if( HAL_GetTick() > (_tsForBlinkAnim + f_period) )                        
+    {
+        UL_LedAllDisable();
+        _RGB_LED_BLUE_CONTROL(1);
+        _RGB_LED_GREEN_CONTROL(1);
+        _led_delay(f_value);
+        UL_LedAllDisable();
+
+        _tsForBlinkAnim = HAL_GetTick();
+    }
 }

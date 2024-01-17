@@ -17,7 +17,10 @@ typedef struct S_SENSOR_ALL_VALUES_TAG
     int32_t distanceValue;
 
     uint8_t halleffectAlarmStatus; // hall effect alarm status, battery cover and top cover
-    //uint8_t alarmEventGroup;       // ilk bit fullness alarm group, ikinci bit full alarm limit   // BUNU silmedim kapattim sadece simdilik, eren abi sen sil.
+
+    #ifdef _accModuleCompile
+        bool accCommunicationError;
+    #endif
 
     bool sendDataFlag; //// to show send gsm data ok flag
 } S_SENSOR_ALL_VALUES;

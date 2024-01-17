@@ -46,7 +46,6 @@ extern char parsedIntValueBuf[];      // 12
 extern char parsedFloatValueBuf[];    // 12
 extern int integerResponseValue;
 extern float floatResponseValue;
-extern bool responseSubcribeDataCallbackFlag;
 extern uint16_t g_subcribeDataCallbackCounter;
 extern uint32_t g_waitResponseCount;
 

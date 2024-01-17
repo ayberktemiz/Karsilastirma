@@ -6,8 +6,10 @@ S_GET_DATA g_sGetData;
 
 _io void AddDataToBufProc(void);
 
-_io void PreparePublishJsonDataProc(void);
-_io bool PrepareResponseDataProc(void);
+//_io 
+void PreparePublishJsonDataProc(uint8_t* HelperBufAddress);
+//_io 
+_io bool ResponseDataParserProc(uint8_t* HelperBufAddress);
 
 _io bool SimDetectedProc(void);
 _io bool GsmGeneralProc(void);
@@ -22,10 +24,10 @@ _io void UpdateParametersProc(void);
 
 _io int16_t m_logRawDataBuf[144];
 _io uint8_t m_logRawDataBufCnt;
-bool g_PublishOkFlag;
+
 bool updateParamsFlag;
-char *json;
-char parsedStringValueBuf[150];   // 50
+
+char parsedStringValueBuf[100];   // 50
 char parsedIntValueBuf[12];      // 12
 char parsedFloatValueBuf[8];    // 12
 int integerResponseValue;
@@ -40,12 +42,16 @@ char *mcu = "STM32L051";
 char *version = "8.4.1";
 uint8_t lat, lon = 0;
 
-
-// uint8_t m_receiveGsmBuf[_gsm_receive_buffer_size];
-extern uint8_t m_GsmBuf[_gsm_receive_buffer_size];
-extern uint8_t m_HelperBuf[_gsm_receive_buffer_size];
-
-
+#ifdef __keep_stats
+  uint16_t total_gsm_attempts = 0;
+  uint16_t success_gsm_attempts = 0;
+  uint16_t failed_gsm_attempts = 0;
+  extern bool m_eMqttConnectionOkFlg;
+  uint16_t connection_ok = 0;
+  uint16_t connection_down = 0;
+  bool connection_losted = 0;
+  uint16_t reconnect_attempt = 0;
+#endif
 
 void UsrProcess(void)
 {
@@ -148,7 +154,7 @@ void UsrProcess(void)
                 #ifdef __usr_process_log
                     __logse("Tank has been emptied. Enter Emptied alarm !");
                 #endif
-                g_packageEventBits  |= _USR_SYSTEM_EVENT_BITS_EMPTIED_ALARM;
+                g_packageEventBits  |= _USR_SYSTEM_EVENT_BITS_FULLNESS_ALARM;
                 _sendDataFlg         = true;
                 _isCleaned           = true;
                 _fullnessLimitExdeed = false;
@@ -166,13 +172,13 @@ void UsrProcess(void)
         #ifdef _accModuleCompile
         if(UL_AccelCheckChip())
         {
-            g_packageEventBits &= ~ _USR_SYSTEM_EVENT_BITS_ACC_COMMUNICATION_ERROR;
+            g_sAllSensorValues.accCommunicationError = 0;
         }
         else
         {
-            g_packageEventBits |= _USR_SYSTEM_EVENT_BITS_ACC_COMMUNICATION_ERROR;
+            g_sAllSensorValues.accCommunicationError = 1;
         }
-        // UL_AccelometerClearFlag(); //..
+        // UL_AccelometerClearFlag();
         #endif
         
 
@@ -191,7 +197,6 @@ void UsrProcess(void)
             #endif
         }
     }
-
     #ifdef __usr_process_log
         if (!_sendDataFlg)
         {
@@ -199,8 +204,23 @@ void UsrProcess(void)
         }
     #endif
     
-    if (_sendDataFlg)
+    //for(uint8_t i=0;i<144;i++) {m_logRawDataBuf[i]=5555;}  m_logRawDataBufCnt = 144 ; // test, tum distance data yerini doldurma
+
+    bool _simInserted;
+    if(SimDetectedProc())                                                      // SIM algılanmazsa, SimDetectedProc return'u false olacak
+        _simInserted = true;                                                   // bu da loop'u iptal eder.
+    else
     {
+        _simInserted = false; 
+        __logsw("ts: %d, Data Send mission CANCELLED because Sim isn't inserted. Going to Sleep Now !\n", UL_RtcGetTs());  // Eren yoruma aldi
+        UL_LedGsmNotifications(2);              // Kırmızı 4 kez Yanar Söner (Sim Yok)
+    }
+        
+    if (_sendDataFlg && _simInserted)
+    {
+        #ifdef __keep_stats
+            total_gsm_attempts++;
+        #endif
         g_dataSendTs = UL_RtcGetTs();
         if(GsmGeneralProc()) 
         // if(1)
@@ -208,20 +228,27 @@ void UsrProcess(void)
             m_logRawDataBufCnt = 0;
             g_packageEventBits = 0;
             _isCleaned = false;
-
             #ifdef __usr_process_log
                 __logsw("ts: %d, Data Send mission SUCCESFULLY Completed. Going to Sleep Now !\n", UL_RtcGetTs());  // Eren yoruma aldi
             #endif
+            #ifdef __keep_stats
+                success_gsm_attempts++;
+            #endif
+            UL_LedGsmNotifications(0);          // Yeşil 4 kez Yanar Söner (GSM Mission Basarili)
         }
         else
         {
             #ifdef __usr_process_log
                 __logsw("ts: %d, Data Send mission FAILED ! Going to Sleep Now !\n", UL_RtcGetTs()); 
             #endif
+            #ifdef __keep_stats
+                failed_gsm_attempts++;
+            #endif
+            UL_LedGsmNotifications(1);          // Mavi 4 kez Yanar Söner (GSM Mission Fail)
         }
-        _sendDataFlg = false;
+        _sendDataFlg = false;       // Data gidemese de, aynı intervalinde gondersin, ismi _sendDataFlg idi, degistirdim.
     }
-    g_sleepFlag = true;   // En başa gitsin başa sarsın 
+    g_sleepFlag = true;      // En başa gitsin başa sarsın 
 }
 
 void UsrProcessLedOpenAnimation(void)
@@ -316,19 +343,21 @@ _io bool GsmGeneralProc(void)
 {
     UsrSystemWatchdogRefresh();
     
+    uint8_t *json = UL_GetHelperBufAddress();
+    
     uint8_t tryCount = 0;
+    uint8_t reconnectAttemps = 0;
     uint8_t step = 0;
+    bool step2FirstRun = true;
+    bool reconnectState = false;
     bool _gsmMissionSuccess = false;                                            // false baslatilir, is biterse true olur ve bu, fonksiyon cikisinda true dondurur !
     bool _gsmLoopEnable = true;                                                 // dongu'ye izin var mi ?
-    
-    UL_GsmModulePeripheral(enableGsmPeripheral);                                // burada olsun, önce Gsm modülü açılsın
-    _gsm_delay(250);
+    bool _publishOkFlag = false;
+    uint32_t connectionLostTime = 0;
 
-    if(!SimDetectedProc())                                                      // SIM algılanmazsa, SimDetectedProc return'u false olacak
-    {
-        _gsmLoopEnable = false;                                                 // bu da loop'u iptal eder.
-        goto end_step;
-    }
+    UL_GsmModulePeripheral(enableGsmPeripheral);                                // burada olsun, önce Gsm modülü açılsın
+    
+    _gsm_delay(250);
 
     uint32_t gsmControlTimeout = HAL_GetTick();
     while(_gsmLoopEnable)
@@ -345,15 +374,18 @@ _io bool GsmGeneralProc(void)
             }
             if(GsmModuleInitialProc())
             {
-                #ifdef __usr_process_log
-                    __logsw("Step 0: Activate MQTT and GSM -> DONE\n");
-                #endif
-                step = 1;
+                if(UL_GsmModuleMqttInitial((const S_GSM_MQTT_CONNECTION_PARAMETERS *)&g_sGsmMqttInitialParameters))
+                {
+                    #ifdef __usr_process_log
+                        __logsw("Step 0: Activate MQTT and GSM -> DONE\n");
+                    #endif
+                    step = 1;
+                }
             }
         }
         else if(step == 1)                                                      // step 1'de, herhangi bir adım'da hata oluşması halinde 5 kez başa dönülür
         {
-            if(UL_GsmModuleMqttInitial((const S_GSM_MQTT_CONNECTION_PARAMETERS *)&g_sGsmMqttInitialParameters))
+            if(UL_GsmModuleMqttStart((const S_GSM_MQTT_CONNECTION_PARAMETERS *)&g_sGsmMqttInitialParameters))
             {
                 if(UL_GsmModuleMqttSubcribeTopic(TOPIC_BRK2MCU, 0))
                 {
@@ -361,7 +393,8 @@ _io bool GsmGeneralProc(void)
                         __logsi("Step 1: Subscribed for Listening to This Topic: %s", TOPIC_BRK2MCU);
                     #endif
                         
-                    PreparePublishJsonDataProc();
+                    PreparePublishJsonDataProc(json);
+
                 start_label:;
 
                     tryCount++;
@@ -369,98 +402,130 @@ _io bool GsmGeneralProc(void)
                         __logsi("Step 1: This is %uth attempt to Publish Data.",tryCount);
                     #endif
 
-
-                    if(UL_GsmModuleMqttPublishTopic(TOPIC_MCU2BRK, m_HelperBuf, 0, 0))
+                    if(UL_GsmModuleMqttPublishTopic(TOPIC_MCU2BRK, json, 0, 0))
                     {
                         #ifdef __usr_process_log
                             __logsi("Step 1: Data Published to This Topic: %s",TOPIC_MCU2BRK);
                             __logsw("Step 1: Subscribe Topic and Publish Data -> DONE\n");
+                            __logsi("Step 2: Wait %usec for response",(_USR_RESPONSE_TIMEOUT/1000));
                         #endif
-                        g_PublishOkFlag = true;
+                        _publishOkFlag = true;
                         step = 2;
                     }
                     else
                     {
                         HAL_Delay(250);
-                        goto start_label;
+                        tryCount++;
+                        if(tryCount <= 5)
+                            goto start_label;
                     }
-                    
                 }
                 else
                     tryCount++;
             }
             else
-                tryCount++;
-        
-            g_waitResponseCount = 0;
-            memset(m_GsmBuf,0,512);
-            memset(m_HelperBuf,0,512);
-            #ifdef __usr_process_log
-                if(step == 2)
-                    __logsi("Step 2: Wait %usec for response",(_USR_RESPONSE_TIMEOUT/1000));
-            #endif
+                tryCount++;  
         }
         else if(step == 2)                                                      // step 2'de, _USR_RESPONSE_TIMEOUT suresi kadar bulunulabilir
         {
-            if(g_waitResponseCount >= _USR_RESPONSE_TIMEOUT)
+            //UL_LedGsmWaitForResponse(100,1000);                                 // Beklerken Turkuaz Blink Animation, ben 1sn koydum ama zaten 3 sn suruyo cevap beklerken her buraya donmesi !!!!!
+
+            if(step2FirstRun)                                                   
+            {
+                g_waitResponseCount = 0;                                        // ilk calismada, sure baslatilir
+                step2FirstRun = false;   
+            }
+            if(reconnectState)
+            {
+                g_waitResponseCount = connectionLostTime;                       // step1'e geri donulmusse, 60 sn kaldigi yerden devam ettirilir.
+                reconnectState = false;
+            }
+
+            if(g_waitResponseCount >= _USR_RESPONSE_TIMEOUT)                    // sure 60sn'yi gecmisse sonlandir
             {
                 #ifdef __usr_process_log
                     __logse(" Step 2: Data Published but No Data Recieved for %usec. Data Send Mission Failed !", (_USR_RESPONSE_TIMEOUT/1000));
                 #endif
-
-                _gsmMissionSuccess = false;
                 break;
             }
-            else
+
+            uint8_t responseStatus = UL_GsmModuleMqttGeneral();
+
+            if(responseStatus == 1)                                     // Gelen Data Dogru
             {
-                UL_GsmModuleMqttGeneral();
-                if(responseSubcribeDataCallbackFlag)
+                #ifdef __usr_process_log
+                    __logsi("Step 2: Data Successfully Recieved!")
+                #endif
+
+                if(ResponseDataParserProc(json))                            // donus degeri: "success" koşulunu check eder.
                 {
                     #ifdef __usr_process_log
-                        __logsi("Step 2: Data Successfully Recieved !")
-                    #endif  
-                    if(PrepareResponseDataProc())
-                    {
-                        #ifdef __usr_process_log
-                            __logsw("Step 2: Recieve Data from Broker, Parsing Data and Updating NVS -> DONE\n");
-                        #endif
-
-                        responseSubcribeDataCallbackFlag = false;
-                        _gsmMissionSuccess  = true;
-                        break;                        
-                    }
-                    else
-                    {
-                        #ifdef __usr_process_log
-                            __logsw("Step 2: Recieve Data from Broker but Response Data is Failed !");
-                        #endif
-
-                        responseSubcribeDataCallbackFlag = false;
-                        _gsmMissionSuccess    = false;
-                        break;
-                    }
-                }   
+                        __logsw("Step 2: Recieve Data from Broker, Parsing Data and Updating NVS -> DONE\n");
+                    #endif
+                    _gsmMissionSuccess  = true;                       
+                }
+                else
+                {
+                    #ifdef __usr_process_log
+                        __logsw("Step 2: Received data was corrupted, Response Data is Failed. !");
+                    #endif                     
+                }
+                break;
             }
+            else if(responseStatus == 2)                                            // Connection Status Down to 0
+            { 
+                reconnectAttemps++;
+                if(reconnectAttemps<5)
+                {
+                    #ifdef __usr_process_log
+                        __logsw("Step 2: Connection Status Down to 0. Turn Back to Step 1 (%u/5)!",reconnectAttemps);
+                    #endif
+                    HAL_Delay(10);
+                    tryCount = 0;                                                   // her donuste deneme haklari yeniden yuklenir
+                    step = 1;                                                       // Baglanti koparsa step1'e geri donulur.
+
+                    #ifdef __keep_stats
+                       reconnect_attempt++;
+                    #endif
+                    
+                    reconnectState = true;
+                    connectionLostTime = g_waitResponseCount;                       // step1'e geri donulmusse, 60 sn kaldigi yerden devam ettirilir.
+                }
+                else
+                {
+                    #ifdef __usr_process_log
+                        __logse("Step 2: Connection keeps dropping. Response Data is Failed !");
+                    #endif
+                    break;
+                }
+            }
+            
         }
+
         if(tryCount > 5)
         {
             #ifdef __usr_process_log
                 __logse("Step 1: After 5 attempts on Step 1, Data Publish Failed\n");
             #endif
             break;
-        }
+        }    
     }
-    
-end_step:;
 
     #ifdef __usr_process_log
-      if( (step == 1) && !g_PublishOkFlag )
+      if( (step == 1) && !_publishOkFlag )
           __logse(" Data Publish Failed 5 times. Data Send Mission Failed !");   
       __logsi(" Terminating Data Sending Task. GSM is shutting down !");   
     #endif
+    #ifdef __keep_stats
+       if(!connection_losted)
+          connection_ok++;
+       else
+          connection_down++;
+       connection_losted = 0;
+    #endif
 
-    g_PublishOkFlag = false;
-    
+    _publishOkFlag = false;
+
     UsrSystemWatchdogRefresh();
     GsmCloseProc();                                                             // Modul kapanip uyku asamasina gidilecek !
     
@@ -505,15 +570,12 @@ _io bool GsmModuleInitialProc(void)
     return false;
 }
 
-// ResponseDataParserProc olsun yeni ismi ? 
-_io bool PrepareResponseDataProc(void)
-{
-    if(UsrProcessStringResponseParser(m_HelperBuf, "success"))
-    {
-        #ifdef __usr_process_log
-           // __logsi("success: %s", parsedStringValueBuf);
-        #endif   
 
+//_io 
+bool ResponseDataParserProc(uint8_t* HelperBufAddress)
+{
+    if(UsrProcessStringResponseParser(HelperBufAddress, "success"))
+    {
         if(strstr(parsedStringValueBuf, "true"))
         {
             #ifdef __usr_process_log
@@ -521,7 +583,7 @@ _io bool PrepareResponseDataProc(void)
             #endif
 
             /* timestamp zaman guncellemesi */
-            if(UsrProcessIntResponseParser(m_HelperBuf, "ts"))
+            if(UsrProcessIntResponseParser(HelperBufAddress, "ts"))
             {
                 #ifdef __usr_process_log
                     __logsi("ts: %d", integerResponseValue);
@@ -533,7 +595,7 @@ _io bool PrepareResponseDataProc(void)
             }
 
             /* sendingDataInterval (periyodik data gonderme)*/
-            if(UsrProcessIntResponseParser(m_HelperBuf, "interval"))
+            if(UsrProcessIntResponseParser(HelperBufAddress, "interval"))
             {
                 #ifdef __usr_process_log
                     __logsi("interval: %d", integerResponseValue);
@@ -548,7 +610,7 @@ _io bool PrepareResponseDataProc(void)
             
             /* version guncellemesi varsa */
             memset((void*)parsedStringValueBuf, 0, sizeof(parsedStringValueBuf));
-            if(UsrProcessStringResponseParser(m_HelperBuf, "version"))
+            if(UsrProcessStringResponseParser(HelperBufAddress, "version"))
             {
                 #ifdef __usr_process_log
                     __logsi("version: %s", parsedStringValueBuf);
@@ -563,7 +625,7 @@ _io bool PrepareResponseDataProc(void)
 
             /* DeviceStatus guncellemesi */
             memset((void*)parsedStringValueBuf, 0, sizeof(parsedStringValueBuf));
-            if(UsrProcessStringResponseParser(m_HelperBuf, "status"))
+            if(UsrProcessStringResponseParser(HelperBufAddress, "status"))
             {
                 #ifdef __usr_process_log
                     __logsi("status: %s", parsedStringValueBuf);
@@ -579,7 +641,7 @@ _io bool PrepareResponseDataProc(void)
             }
 
             /* deltaTemp e bakiyorum ama parse etmiyorum */
-            if(UsrProcessFloatResponseParser(m_HelperBuf, "deltaTemp"))
+            if(UsrProcessFloatResponseParser(HelperBufAddress, "deltaTemp"))
             {
                 #ifdef __usr_process_log
                     __logsi("deltaTemp: %.3f", floatResponseValue);
@@ -587,7 +649,7 @@ _io bool PrepareResponseDataProc(void)
             }
 
             /* deviceStatusCheckTime guncellemesi */
-            if(UsrProcessIntResponseParser(m_HelperBuf, "deviceStatusCheckTime"))
+            if(UsrProcessIntResponseParser(HelperBufAddress, "deviceStatusCheckTime"))
             {
                 #ifdef __usr_process_log
                     __logsi("deviceStatusCheckTime: %d", integerResponseValue);
@@ -600,7 +662,7 @@ _io bool PrepareResponseDataProc(void)
 
             /* link guncellemesi */
             memset((void*)parsedStringValueBuf, 0, sizeof(parsedStringValueBuf));
-            if(UsrProcessStringResponseParser(m_HelperBuf, "link"))
+            if(UsrProcessStringResponseParser(HelperBufAddress, "link"))
             {
                 #ifdef __usr_process_log
                     __logsi("link: %s", parsedStringValueBuf);
@@ -614,7 +676,7 @@ _io bool PrepareResponseDataProc(void)
             }
 
             /* depthAlarmLimit guncellemesi */
-            if(UsrProcessIntResponseParser(m_HelperBuf, "depth"))
+            if(UsrProcessIntResponseParser(HelperBufAddress, "depth"))
             {
                 #ifdef __usr_process_log
                     __logsi("depthAlarmLimit: %d", integerResponseValue);
@@ -627,7 +689,7 @@ _io bool PrepareResponseDataProc(void)
             }
 
             /* fullnessAlarmLimit guncellemesi */
-            if(UsrProcessIntResponseParser(m_HelperBuf, "fullness"))
+            if(UsrProcessIntResponseParser(HelperBufAddress, "fullness"))
             {
                 #ifdef __usr_process_log
                     __logsi("fullnessAlarmLimit: %d", integerResponseValue);
@@ -639,7 +701,7 @@ _io bool PrepareResponseDataProc(void)
             }
 
             /* toleranceValue guncellemesi */
-            if(UsrProcessIntResponseParser(m_HelperBuf, "tolerance"))
+            if(UsrProcessIntResponseParser(HelperBufAddress, "tolerance"))
             {
                 #ifdef __usr_process_log
                     __logsi("toleranceValue: %d", integerResponseValue);
@@ -651,7 +713,7 @@ _io bool PrepareResponseDataProc(void)
             }
 
             /* sensorWakeUp guncellemesi */
-            if(UsrProcessIntResponseParser(m_HelperBuf, "sensorWakeUp"))
+            if(UsrProcessIntResponseParser(HelperBufAddress, "sensorWakeUp"))
             {
                 #ifdef __usr_process_log
                     __logsi("sensorWakeUp: %d", integerResponseValue);
@@ -664,7 +726,7 @@ _io bool PrepareResponseDataProc(void)
             
             UpdateParametersProc();
             #ifdef __usr_process_log
-                __logsi("Step 2: Data parsed for %d times. Parsing Done !", g_subcribeDataCallbackCounter);
+                __logsi("Step 2: Parsing Done !");
             #endif
 
             return true;
@@ -686,64 +748,55 @@ _io bool PrepareResponseDataProc(void)
     }
 }
 
-_io void PreparePublishJsonDataProc(void)
+
+
+_io void PreparePublishJsonDataProc(uint8_t* HelperBufAddress)
 {
-    memset(m_HelperBuf,0,512);
-    if(1)
-    {
-        sprintf(m_HelperBuf,"{\"deviceReset\":%d,\"ts\":%d,\"sendType\":%d,\"mcu\":%s,\"module\":%s,\"sigq\":%d,\"ccid\":%s,\"comeFromReset\":%s,\"periodicDataSend\":%s,\"accShakeSend\":%s,\"accCommmErr\":%s,\"temp\":%.3f,\"charge\":%.3f,\"fireAlarm\":%s,\"fullAlarm\":%s,\"emptiedAlarm\":%s,\"coverAlarm\":%s,\"batteryCoverAlarm\":%s,\"version\":%s,\"lat\":%d,\"lon\":%d,\"distanceDatas\":",
-            g_sNvsDeviceInfo.deviceStatus,
-            g_sAllSensorValues.rtc,
-            g_packageEventBits,
-            mcu,
-            g_sGsmModuleInfo.moduleInfoBuf,
-            g_sGsmModuleInfo.signal,
-            g_sGsmModuleInfo.iccidBuf,
-            ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_DEVICE_RESET) ? "true" : "false" ),
-            ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_PERIODIC_DATA_SEND) ? "true" : "false" ),
-            ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_ACC_SHAKE_ALARM) ? "true" : "false" ),
-            ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_ACC_COMMUNICATION_ERROR) ? "true" : "false" ),
-            g_sAllSensorValues.tempValue,
-            g_sAllSensorValues.batteryVoltage,
-            ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_FIRE_ALARM) ? "true" : "false" ),
-            ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_FULL_ALARM) ? "true" : "false" ),
-            ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_EMPTIED_ALARM) ? "true" : "false" ),
-            ((g_sAllSensorValues.halleffectAlarmStatus & 0x01) ? "true" : "false"),
-            ((g_sAllSensorValues.halleffectAlarmStatus & 0x02) ? "true" : "false"),
-            (_device_version),
-            lat,
-            lon);
+    memset(HelperBufAddress,0,_gsm_buffer_size);
 
-        // eğer tek data varsa direkt [data] seklinde yazalim
-        if(m_logRawDataBufCnt == 1)
-            sprintf(m_HelperBuf, "%s[%u]}",m_HelperBuf, m_logRawDataBuf[0]);
-        else
-        {
-            // yukarida hazirlanan datayla birlesim durumunu yonetebilmek icin ilk datayi ayri yazdim, benimki bosluksuz ve [ ile basliyor simdilik
-            sprintf(m_HelperBuf, "%s[%u",m_HelperBuf, m_logRawDataBuf[0]);
+    sprintf(HelperBufAddress,"{\"deviceStatus\":%d,\"ts\":%d,\"EventBits\":%d,\"mcu\":%s,\"module\":%s,\"sigq\":%d,\"ccid\":%s,\"comeFromReset\":%s,\"periodicDataSend\":%s,\"accShakeSend\":%s,\"accCommnErr\":%s,\"temp\":%.3f,\"charge\":%.3f,\"fireAlarm\":%s,\"fullAlarm\":%s,\"fullness\":%s,\"coverAlarm\":%s,\"topCoverAlarm\":%s,\"batteryCoverAlarm\":%s,\"version\":%s,\"lat\":%d,\"lon\":%d,\"distanceDatas\":",
+        g_sNvsDeviceInfo.deviceStatus,
+        g_sAllSensorValues.rtc,
+        g_packageEventBits,
+        mcu,
+        g_sGsmModuleInfo.moduleInfoBuf,
+        g_sGsmModuleInfo.signal,
+        g_sGsmModuleInfo.iccidBuf,
+        ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_DEVICE_RESET) ? "true" : "false" ),
+        ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_PERIODIC_DATA_SEND) ? "true" : "false" ),
+        ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_ACC_SHAKE_ALARM) ? "true" : "false" ),
+        ((g_sAllSensorValues.accCommunicationError) ? "true" : "false"),
+        g_sAllSensorValues.tempValue,
+        g_sAllSensorValues.batteryVoltage,
+        ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_FIRE_ALARM) ? "true" : "false" ),
+        ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_FULL_ALARM) ? "true" : "false" ),
+        ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_FULLNESS_ALARM) ? "true" : "false" ),
+        ( (g_packageEventBits & _USR_SYSTEM_EVENT_BITS_COVERS_ALARM) ? "true" : "false" ),
+        ((g_sAllSensorValues.halleffectAlarmStatus & 0x01) ? "true" : "false"),
+        ((g_sAllSensorValues.halleffectAlarmStatus & 0x02) ? "true" : "false"),
+        (_device_version),
+        lat,
+        lon);
 
-            for(int i=1 ; i<(m_logRawDataBufCnt-1) ; i++)
-            {
-                  // dizi ortasinda yer alan datalarin bitisiklik durumunu yonetiyor, ben virgül ve bosluk biraktim simdilik
-                  sprintf(m_HelperBuf, "%s, %u",m_HelperBuf, m_logRawDataBuf[i]);
-            }
+      // eğer tek data varsa direkt [data] seklinde yazalim
+      if(m_logRawDataBufCnt == 1)
+          sprintf(HelperBufAddress, "%s[%u]}",HelperBufAddress, m_logRawDataBuf[0]);
+      else
+      {
+          // yukarida hazirlanan datayla birlesim durumunu yonetebilmek icin ilk datayi ayri yazdim, benimki bosluksuz ve [ ile basliyor simdilik
+          sprintf(HelperBufAddress, "%s[%u",HelperBufAddress, m_logRawDataBuf[0]);
 
-            // dizisinin sonlanisi icin son data ayri yazildi. ben diziyi son data ile ] bosluksuz, sonrada bosluksuz } seklinde bitirdim.
-            sprintf(m_HelperBuf, "%s, %u]}",m_HelperBuf, m_logRawDataBuf[m_logRawDataBufCnt-1]);
-        }
-        
-    #ifdef __usr_process_log
-        //__logsi("Preloaded Json: %s",m_HelperBuf);
-        __logsi("Preloaded Json: OLMASI GEREKIYO AMA OLMUYO !! CTRL SHIFT F ILE BUL BURAYI !!!");
-    #endif
-    }
-    else
-    {
-        #ifdef __usr_process_log 
-            __logse("m_JsonDataBuf NULL !!!");
-        #endif
-    }  
+          for(int i=1 ; i<(m_logRawDataBufCnt-1) ; i++)
+          {
+                // dizi ortasinda yer alan datalarin bitisiklik durumunu yonetiyor, ben virgül ve bosluk biraktim simdilik
+                sprintf(HelperBufAddress,"%s,%u",HelperBufAddress, m_logRawDataBuf[i]);
+          }
+
+          // dizisinin sonlanisi icin son data ayri yazildi. ben diziyi son data ile ] bosluksuz, sonrada bosluksuz } seklinde bitirdim.
+          sprintf(HelperBufAddress,"%s,%u]}",HelperBufAddress, m_logRawDataBuf[m_logRawDataBufCnt-1]);
+      }
 }
+
 
 _io void UpdateParametersProc(void)
 {
@@ -770,6 +823,8 @@ _io void UpdateParametersProc(void)
                 g_sNvsDeviceInfo.sendingDataInterval = g_sGetData.interval;
                 updateParamsFlag = true;
             }
+            else
+                __logsi("Dummy Data Send interval must be  greater than Sensor Wake Up interval! Change Not Applied.");
         }
     }
     if(g_sGetData.deviceStatusCheckTime != g_sNvsDeviceInfo.deviceStatusCheckTime)
@@ -799,6 +854,8 @@ _io void UpdateParametersProc(void)
             g_sNvsDeviceInfo.sensorWakeUpTime = g_sGetData.sensorWakeUp;
             updateParamsFlag = true;
         }
+        else
+            __logsi("Sensor Wake Up interval must be less than  Dummy Data Send interval! Change Not Applied.");
     }
     if(updateParamsFlag)
         UsrNvsUpdate();
@@ -827,19 +884,16 @@ _io bool UsrProcessStringResponseParser(const char* input, const char* parserStr
                 if(ptr != NULL)
                 {
                     ptr++;
-                    while (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == '\r') 
+                    while (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == '\r' || *ptr == '\"')         // buradaki mudahaleme ozellikle dikkat
                         ptr++;
                 }
-
-                if (*ptr == '\"') 
-                {
-                    ptr++;
-                    uint8_t i = 0;
-                    while (*ptr != '\"' && i < sizeof(parsedStringValueBuf) - 1)
-                        parsedStringValueBuf[i++] = *ptr++;
                     
-                    parsedStringValueBuf[i] = '\0';
-                }
+                uint8_t i = 0;
+                while (*ptr != '\"' && i < sizeof(parsedStringValueBuf) - 1)
+                    parsedStringValueBuf[i++] = *ptr++;
+                
+                parsedStringValueBuf[i] = '\0';
+                
                 ptr++;
                 
                 free(copyResponse);
@@ -893,7 +947,7 @@ _io bool UsrProcessIntResponseParser(const char* input, const char* parserIntVal
                 if (ptr != NULL)
                 {
                     ptr++;
-                    while (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == '\r')
+                    while (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == '\r')                 // buradaki degisilige ozellikle dikkat, ayberk
                         ptr++;
 
                     uint8_t i = 0;
@@ -1008,7 +1062,7 @@ _io bool SimDetectedProc(void)
     uint32_t simDetectedTimeout = HAL_GetTick();
     while(!simInsertedFlag)
     {
-        if(HAL_GetTick() - simDetectedTimeout > 3000)
+        if( ( HAL_GetTick() - simDetectedTimeout ) > 3000)
         {
             #ifdef __usr_process_log
                 __logse("Step 0: SIM NOT INSERTED");

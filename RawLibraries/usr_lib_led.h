@@ -52,5 +52,6 @@ void UL_LedPilVoltageError(void);
 void UL_LedLevelSensorError(void);
 void UL_LedAccelError(void);
 void UL_LedGsmNotifications(uint8_t f_value);
+void UL_LedGsmWaitForResponse(uint16_t f_value, uint16_t f_period);
 
 #endif //__USR_LIB_LED_H
